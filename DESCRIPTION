@@ -1,0 +1,35 @@
+Package: simpower
+Type: Package
+Title: Simulation-Based Statistical Power for Causal Designs
+Version: 0.1.2
+Authors@R: person(given = "Jonathan Stavnskær",
+                   family = "Doucette",
+                   role = c("aut", "cre"),
+                   email = "your.email@example.com")
+Description: Computes statistical power and the minimum detectable effect (MDE)
+    for four causal inference designs -- two-way fixed effects (TWFE), event
+    study, instrumental variables (IV/2SLS), and regression discontinuity (RDD)
+    -- directly from the user's own data. Instead of relying on closed-form
+    power formulas that assume i.i.d. data, it follows the Monte-Carlo
+    recombination approach of Doucette (2025): the outcome is repeatedly
+    recombined to impose the empirical null, the design's own estimator and
+    standard errors are computed on each recombined sample, and a growing true
+    effect is injected analytically to trace the full power curve. The approach
+    preserves the real features of the data (autocorrelation, clustering,
+    missingness, instrument strength, running-variable shape) that determine
+    power. Users can vary the number of available units, the number of treated
+    units, and the set of control variables across all designs; choose the
+    assumed effect shape (constant, increasing, or decreasing) for event
+    studies; and vary the bandwidth for RDD.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
+Depends: R (>= 4.0.0)
+Imports: stats, utils, ggplot2, patchwork
+Suggests: AER, sandwich, fixest, rdrobust, testthat (>= 3.0.0), knitr,
+        rmarkdown
+Config/testthat/edition: 3
+URL: https://github.com/faranordk/simpower
+BugReports: https://github.com/faranordk/simpower/issues
+NeedsCompilation: no
