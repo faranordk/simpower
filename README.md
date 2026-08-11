@@ -397,5 +397,4 @@ plan_mde(pw, n_treated = c(10, 25, 50))       # or sweep the treated count
 Doucette, M. (2025). What Can We Learn About the Effects of Democracy Using
 Cross-National Data? *American Political Science Review*, 119(3).
 
-Doucette, M. (2026). simpower: Simulation-Based Statistical Power for Panel and
-Causal Designs. *arXiv*.
+Doucette, M. (2026). simpower: Simulation-Based Statistical Power TWFE, event-studies, IV and RDD. *OSF*: osf.io/3jk4e/files/2qg9f.
