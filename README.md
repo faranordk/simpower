@@ -27,15 +27,14 @@ effect whose power reaches the target (80% by default).
 
 ## What each design estimates
 
-Every design fits a linear-in-outcome estimator on the recombined sample; the
-**tested coefficient** is the one a growing effect is injected into.
+Every design fits a linear-in-outcome estimator on the recombined sample.
 
 **`power_twfe()` — two-way fixed effects.** Within regression, unit-clustered SE:
 
 $$Y_{it} = \beta\,X_{it} + \gamma' Z_{it} + \alpha_i + \delta_t + \varepsilon_{it}$$
 
 The coefficient on the treatment $X_{it}$, $\beta$, is tested. $\alpha_i$ and
-$\delta_t$ are unit and time fixed effects, $Z_{it}$ optional controls.
+$\delta_t$ are unit and time fixed effects, $Z_{it}$ are optional controls.
 
 **`power_event()` — event study.** Two regressions on the same panel. The
 **overall** curve uses a single shaped-exposure term $P_{it}$ — the
