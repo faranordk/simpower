@@ -13,6 +13,17 @@ of Doucette (2025; 2026):
 | `power_iv()` | Instrumental variables (2SLS) | — |
 | `power_rdd()` | Sharp regression discontinuity | MDE-vs-bandwidth graph |
 
+## Installation
+
+```r
+# install.packages("remotes")
+remotes::install_github("faranordk/simpower")
+```
+
+Required: **ggplot2**, **patchwork**, **AER**, **sandwich**, **lmtest**.
+Optional accelerators used automatically if present: **fixest** (TWFE / event
+study point estimates) and **rdrobust** (MSE-optimal RDD bandwidth selection).
+
 ## The approach
 
 For each design the outcome for each unit is repeatedly randomly recombined with another units treatment so that any true
@@ -74,16 +85,7 @@ $$Y_i = \tau\,T_i + \beta_0 + \beta_1 (R_i - c) + \beta_2\,T_i (R_i - c) + \gamm
 The jump at the cutoff, $\tau$, is tested. Triangular kernel by default (or
 uniform); HC1 SE, or clustered when an `id` is supplied.
 
-## Installation
 
-```r
-# install.packages("remotes")
-remotes::install_github("faranordk/simpower")
-```
-
-Required: **ggplot2**, **patchwork**, **AER**, **sandwich**, **lmtest**.
-Optional accelerators used automatically if present: **fixest** (TWFE / event
-study point estimates) and **rdrobust** (MSE-optimal RDD bandwidth selection).
 
 ## Shared arguments
 
