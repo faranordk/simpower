@@ -1,9 +1,9 @@
 # simpower
 
-**Simulation-based statistical power for causal designs — computed from your own data.**
+**Simulation-based statistical power for TWFE, event-studies, IV and RDD.**
 
 `simpower` estimates statistical power and the **minimum detectable effect (MDE)**
-for four causal-inference designs, using the Monte-Carlo *recombination* method
+for four causal-inference designs, using the simulation approach
 of Doucette (2025; 2026):
 
 | Function | Design | Extra figure |
