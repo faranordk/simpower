@@ -1,11 +1,11 @@
 Package: simpower
 Type: Package
 Title: Simulation-Based Statistical Power for Causal Designs
-Version: 0.1.2
+Version: 0.2.0
 Authors@R: person(given = "Jonathan Stavnskær",
                    family = "Doucette",
                    role = c("aut", "cre"),
-                   email = "your.email@example.com")
+                   email = "jona1406@gmail.com")
 Description: Computes statistical power and the minimum detectable effect (MDE)
     for four causal inference designs -- two-way fixed effects (TWFE), event
     study, instrumental variables (IV/2SLS), and regression discontinuity (RDD)

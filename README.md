@@ -1,28 +1,17 @@
 # simpower
 
-**Simulation-based statistical power for TWFE, event-studies, IV and RDD.**
+**Simulation-based statistical power for causal designs — computed from your own data.**
 
 `simpower` estimates statistical power and the **minimum detectable effect (MDE)**
-for four causal-inference designs, using the simulation approach
+for four causal-inference designs, using the Monte-Carlo *recombination* method
 of Doucette (2025; 2026):
 
 | Function | Design | Extra figure |
 |---|---|---|
 | `power_twfe()` | Two-way (unit + time) fixed effects | — |
 | `power_event()` | Event study | per-horizon MDE graph |
-| `power_iv()` | Instrumental variables (2SLS) | — |
+| `power_iv()` | Instrumental variables (2SLS) | power curves by instrument strength (optional, via `L`/`rho`) |
 | `power_rdd()` | Sharp regression discontinuity | MDE-vs-bandwidth graph |
-
-## Installation
-
-```r
-# install.packages("remotes")
-remotes::install_github("faranordk/simpower")
-```
-
-Required: **ggplot2**, **patchwork**, **AER**, **sandwich**, **lmtest**.
-Optional accelerators used automatically if present: **fixest** (TWFE / event
-study point estimates) and **rdrobust** (MSE-optimal RDD bandwidth selection).
 
 ## The approach
 
@@ -38,14 +27,15 @@ effect whose power reaches the target (80% by default).
 
 ## What each design estimates
 
-Every design fits a linear-in-outcome estimator on the recombined sample.
+Every design fits a linear-in-outcome estimator on the recombined sample; the
+**tested coefficient** is the one a growing effect is injected into.
 
 **`power_twfe()` — two-way fixed effects.** Within regression, unit-clustered SE:
 
 $$Y_{it} = \beta\,X_{it} + \gamma' Z_{it} + \alpha_i + \delta_t + \varepsilon_{it}$$
 
 The coefficient on the treatment $X_{it}$, $\beta$, is tested. $\alpha_i$ and
-$\delta_t$ are unit and time fixed effects, $Z_{it}$ are optional controls.
+$\delta_t$ are unit and time fixed effects, $Z_{it}$ optional controls.
 
 **`power_event()` — event study.** Two regressions on the same panel. The
 **overall** curve uses a single shaped-exposure term $P_{it}$ — the
@@ -85,7 +75,16 @@ $$Y_i = \tau\,T_i + \beta_0 + \beta_1 (R_i - c) + \beta_2\,T_i (R_i - c) + \gamm
 The jump at the cutoff, $\tau$, is tested. Triangular kernel by default (or
 uniform); HC1 SE, or clustered when an `id` is supplied.
 
+## Installation
 
+```r
+# install.packages("remotes")
+remotes::install_github("faranordk/simpower")
+```
+
+Required: **ggplot2**, **patchwork**, **AER**, **sandwich**, **lmtest**.
+Optional accelerators used automatically if present: **fixest** (TWFE / event
+study point estimates) and **rdrobust** (MSE-optimal RDD bandwidth selection).
 
 ## Shared arguments
 
@@ -198,6 +197,31 @@ early horizons and shrink toward the peak. For `"constant"` all `w_k = 1`, so
 * `id` (optional) — a cluster id; when supplied, SEs are clustered by `id`
   instead of the default heteroskedasticity-robust (HC1).
 * `time` (optional) — a time column, if the data are panel-structured.
+* `L`, `rho` (optional) — switch on **hypothetical-instrument mode** (supply
+  either `z` or `L`, not both). Use this *before you have an instrument*: it
+  answers "if I could find an instrument with a first-stage correlation of r,
+  would this design have any power?". `L` is any variable in your data whose
+  distributional character the imagined instrument should inherit (its scale
+  and shape are used as the noise carrier; its actual correlations are not).
+  On every simulation rep the `L` series is randomly permuted — breaking its
+  correlation with both the treatment and the outcome — and one synthetic
+  instrument is built per value of `rho` as
+
+  $$z_r = r\,\tilde X + \sqrt{1-r^2}\,\tilde L_\perp,$$
+
+  where $\tilde X$ is the standardised treatment and $\tilde L_\perp$ the
+  permuted `L` residualised on the treatment and standardised. By construction
+  the in-sample Pearson correlation between $z_r$ and the treatment is
+  **exactly** `r` on every rep, and the same recombined outcome is shared
+  across the `rho` values — so the returned family of power curves isolates
+  what instrument strength alone does to power. `rho` defaults to
+  `c(0.1, 0.3, 0.5)`; each value must be strictly between 0 and 1 (the sign
+  is irrelevant: 2SLS is invariant to the instrument's sign). The printout
+  reports one MDE row per `rho` plus the implied first-stage F
+  ($F = r^2 (n-2) / (1-r^2)$, deterministic because the correlation is exact),
+  and `plot()` draws one colour-coded curve per `rho`. This mode is
+  cross-sectional (omit `time`; `id` may still be supplied for clustered SEs),
+  and `mde()` / `power_at()` return per-`rho` data frames.
 
 ### `power_rdd()`
 
@@ -318,6 +342,44 @@ power_iv(sim_iv(n = 1000, strength = 0.15), y = "y", d = "d", z = "z", reps = 50
 # power_iv(mydata, "y", "d", "z", controls = c("w1", "w2"), id = "cluster")
 ```
 
+#### Hypothetical instrument: what strength would I need?
+
+No instrument yet? Supply `L` instead of `z` and a set of assumed first-stage
+correlations, and see how the power curve shifts with instrument strength:
+
+```r
+iv <- sim_iv(n = 1000, strength = 0.4)
+iv$cand <- rgamma(nrow(iv), 2)     # any series; only its scale/shape are used
+ph <- power_iv(iv, y = "y", d = "d", L = "cand",
+               rho = c(0.1, 0.3, 0.5), reps = 500)
+ph
+```
+
+```
+<simpower> Instrumental variables (2SLS)
+  test: one-sided (greater), alpha = 0.05, reps = 500
+  hypothetical instrument: L = 'cand', curves by cor(z, x)
+  MDE by instrument strength:
+ rho   80%   90% med_se implied_F 80% (SD) 90% (SD)
+ 0.1 0.907 1.102 0.3902      10.1    0.485    0.589
+ 0.3 0.322 0.371 0.1266      98.7    0.172    0.198
+ 0.5 0.195 0.234 0.0758     332.7    0.104    0.125
+```
+
+```r
+plot(ph)                      # one colour-coded power curve per rho
+mde(ph, target = 0.7)         # per-rho MDE at any power level (data frame)
+power_at(ph, c(0.25, 0.5))    # power at given effects, one column per rho
+```
+
+Reading it: with n = 1000, an instrument correlating only 0.1 with the
+treatment (implied first-stage F ≈ 10) needs a true effect of ~0.91 for 80%
+power, while r = 0.5 detects ~0.20 — a direct answer to "how strong an
+instrument do I need to detect the effect I expect?". Each rep permutes `L`
+(so it carries no real correlation with anything) and rebuilds the synthetic
+instrument at exactly the requested correlation; see the argument description
+above for the construction.
+
 ### 4. Regression discontinuity
 
 ```r
@@ -346,12 +408,11 @@ power_rdd(sim_rdd(n = 2000), y = "y", run = "x", cutoff = 0, bandwidth = 0.5,
           kernel = "uniform", bw_grid = c(0.25, 0.5, 0.75, 1.0), reps = 500)
 ```
 
-> **Plotting note.** `plot(x)` defaults to `type = "both"`, which stitches the
-> two panels together with **patchwork**. If you see
-> `Can't add .gg_bandwidth(x) to a <ggplot> object`, your ggplot2 is newer than
-> your patchwork — update both (`install.packages(c("patchwork", "ggplot2"))`)
-> or draw one panel at a time with `type = "overall"` / `"bandwidth"`
-> (`"horizon"` for event studies).
+> **Plotting note.** For event studies and RDD, `plot(x)` defaults to
+> `type = "both"`, which stitches the two panels together with **patchwork**
+> (this works in a fresh session as of 0.1.3 — no `library(patchwork)`
+> needed). Draw one panel at a time with `type = "overall"` /
+> `"bandwidth"` (`"horizon"` for event studies).
 
 ## Reading the result
 
@@ -385,6 +446,10 @@ plan_mde(pw, n_treated = c(10, 25, 50))       # or sweep the treated count
   shows exactly which horizons are well powered.
 * **RDD bandwidth**: a wider bandwidth uses more data (smaller MDE) at the cost
   of bias; the MDE-vs-bandwidth graph makes that trade-off explicit.
+* **IV instrument strength**: in hypothetical-instrument mode (`L` + `rho`),
+  the fan of power curves shows directly how much power a stronger first stage
+  buys — useful for deciding whether a candidate instrument is worth pursuing
+  before committing to a design.
 
 ## Notes on standard errors
 
@@ -398,4 +463,5 @@ plan_mde(pw, n_treated = c(10, 25, 50))       # or sweep the treated count
 Doucette, M. (2025). What Can We Learn About the Effects of Democracy Using
 Cross-National Data? *American Political Science Review*, 119(3).
 
-Doucette, M. (2026). simpower: Simulation-Based Statistical Power TWFE, event-studies, IV and RDD. *OSF*: osf.io/3jk4e/files/2qg9f.
+Doucette, M. (2026). simpower: Simulation-Based Statistical Power for Panel and
+Causal Designs. *arXiv*.
