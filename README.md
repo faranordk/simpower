@@ -9,7 +9,7 @@ of Doucette (2025; 2026):
 | Function | Design | Extra figure |
 |---|---|---|
 | `power_twfe()` | Two-way (unit + time) fixed effects | — |
-| `power_event()` | Event study | per-horizon MDE graph |
+| `power_event()` | Event study | treatment-by-post-period MDE graph |
 | `power_iv()` | Instrumental variables (2SLS) | power curves by instrument strength (optional, via `L`/`rho`) |
 | `power_rdd()` | Sharp regression discontinuity | MDE-vs-bandwidth graph |
 
@@ -45,13 +45,13 @@ weight 1 (so the MDE is in units of the *peak* effect):
 
 $$Y_{it} = \beta\,P_{it} + \gamma' Z_{it} + \alpha_i + \delta_t + \varepsilon_{it}$$
 
-The **per-horizon** graph comes from the dynamic regression on the event-time
+The **treatment-by-post-period** graph comes from the dynamic regression on the event-time
 dummies $D_{it}^{k}$ (relative time $k = t - \text{adoption}$; horizon $-1$
 omitted as the baseline, leads kept as placebos):
 
 $$Y_{it} = \sum_{k} \theta_k\,D_{it}^{k} + \gamma' Z_{it} + \alpha_i + \delta_t + \varepsilon_{it}$$
 
-each $\theta_k$ giving the effect detectable at that horizon; the per-horizon
+each $\theta_k$ giving the effect detectable at that time period; the treatment-by-post-period
 graph reports these in units of the peak effect ($\theta_k$'s MDE divided by the
 shape weight $w_k$), so it reflects the assumed `shape`. Both use unit-clustered
 SEs.
@@ -157,8 +157,8 @@ define the estimate, then design-specific controls.
     after treatment and fades linearly.
 
   Because the shape decides whether identifying signal sits at early
-  well-measured horizons or later noisier ones, it moves the overall MDE, and
-  the per-horizon graph now reflects it too (see below).
+  well-measured post-treatment time periods or later noisier ones, it moves the overall MDE, and
+  the treatment-by-post-period graph now reflects it too (see below).
 
   The path is always **linear**, so with `"increasing"` the effect grows by a
   *constant* increment of `1/(H+1)` of the peak each period — `β/(H+1)` per
@@ -200,7 +200,7 @@ early horizons and shrink toward the peak. For `"constant"` all `w_k = 1`, so
 * `L`, `rho` (optional) — switch on **hypothetical-instrument mode** (supply
   either `z` or `L`, not both). Use this *before you have an instrument*: it
   answers "if I could find an instrument with a first-stage correlation of r,
-  would this design have any power?". `L` is any variable in your data whose
+  how powered would this design be?". `L` is any variable in your data whose
   distributional character the imagined instrument should inherit (its scale
   and shape are used as the noise carrier; its actual correlations are not).
   On every simulation rep the `L` series is randomly permuted — breaking its
