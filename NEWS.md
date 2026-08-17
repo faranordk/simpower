@@ -1,5 +1,20 @@
 # simpower 0.2.1
 
+* **`n_units` / `n_treated` may now exceed the sample ("would collecting more
+  data help?").** Previously a request beyond the observed number of units was
+  silently capped at what the data contain, so sample-size planning could only
+  sweep downward. Requests beyond the pool are now met by replicating observed
+  units -- each pool enters `floor(n/pool)` times in full plus a random draw
+  of the remainder -- with every copy treated as its own cluster (a cluster
+  bootstrap). This works in all four designs and, since `plan_mde()` simply
+  re-runs the fitted call, `plan_mde(pw, n_units = c(48, 96, 192))` now traces
+  the MDE into hypothetical larger samples. The extrapolation assumes new
+  units resemble those already observed. Within-sample requests draw exactly
+  the same units (and consume the same RNG stream) as before, so existing
+  results reproduce bit-for-bit. Supplying only `n_treated` beyond the treated
+  pool now grows the total so all control units are kept, instead of crowding
+  controls out.
+
 * **Panel designs now capture the efficiency gain from controls that predict
   the outcome.** The panel recombination (`power_twfe()`, `power_event()`, and
   `power_iv()` with `id` + `time`) swapped each unit's entire outcome series

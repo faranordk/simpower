@@ -95,8 +95,14 @@ Across all four designs you can set:
   (only the control-purged residual is recombined), so controls that predict
   the outcome shrink the simulated SEs — and the MDE — exactly as they do in
   the real fit;
-* `n_units` — the number of units to draw for each simulated sample;
-* `n_treated` — how many of those units are treated;
+* `n_units` — the number of units to draw for each simulated sample. May
+  exceed the number of units in the data ("would collecting more data
+  help?"): the surplus is drawn by replicating observed units, each copy
+  entering as its own cluster, so e.g.
+  `plan_mde(pw, n_units = c(48, 96, 192))` traces the MDE into hypothetical
+  larger samples;
+* `n_treated` — how many of those units are treated (may likewise exceed the
+  observed treated count);
 * `reps` (default `1000`) — the number of recombination simulations. More reps
   give a smoother power curve and a more precise MDE; they do **not** change the
   answer in expectation (no bias), only the Monte-Carlo noise around it. Start
