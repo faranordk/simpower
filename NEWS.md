@@ -1,3 +1,29 @@
+# simpower 0.2.1
+
+* **Panel designs now capture the efficiency gain from controls that predict
+  the outcome.** The panel recombination (`power_twfe()`, `power_event()`, and
+  `power_iv()` with `id` + `time`) swapped each unit's entire outcome series
+  for a donor's, which broke not only the y ~ treatment link (intended) but
+  also the y ~ controls link (unintended): in every simulated fit the controls
+  explained ~nothing, so the simulated SEs -- and the MDE -- ignored the
+  variance reduction that predictive controls deliver in the real fit. The
+  recombination now partials the controls' predicted component out of the
+  outcome, recombines the control-purged residual series across units, and
+  adds each row's own control-predicted component back. The component is
+  estimated to match each estimator's own specification: a two-way within
+  regression of y on the controls for `power_twfe()` / `power_event()` (whose
+  estimators absorb both fixed effects), and a pooled regression of y on the
+  controls for the panel branch of `power_iv()` (whose 2SLS estimator includes
+  no fixed effects). Controls therefore explain exactly the
+  share of variance in the simulated fits that they explain in the real data;
+  the null estimates stay centered at zero and their spread shrinks in step
+  with the SEs, so the null t-statistics -- and the test's size -- are
+  unchanged. With `controls = NULL` the code path and RNG stream are
+  identical, so results without controls are exactly reproduced. The
+  cross-sectional designs (`power_rdd()`, cross-sectional `power_iv()`)
+  already preserved the controls' fit via the residual-permutation null and
+  are unchanged.
+
 # simpower 0.2.0
 
 * **New: hypothetical-instrument mode in `power_iv()`.** Supply `L =` (a column

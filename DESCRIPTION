@@ -1,7 +1,7 @@
 Package: simpower
 Type: Package
 Title: Simulation-Based Statistical Power for Causal Designs
-Version: 0.2.0
+Version: 0.2.1
 Authors@R: person(given = "Jonathan Stavnskær",
                    family = "Doucette",
                    role = c("aut", "cre"),

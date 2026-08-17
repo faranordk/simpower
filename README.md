@@ -90,7 +90,11 @@ study point estimates) and **rdrobust** (MSE-optimal RDD bandwidth selection).
 
 Across all four designs you can set:
 
-* `controls` — a character vector of control-variable columns to partial out;
+* `controls` — a character vector of control-variable columns to partial out.
+  The recombination preserves the controls' predicted component of the outcome
+  (only the control-purged residual is recombined), so controls that predict
+  the outcome shrink the simulated SEs — and the MDE — exactly as they do in
+  the real fit;
 * `n_units` — the number of units to draw for each simulated sample;
 * `n_treated` — how many of those units are treated;
 * `reps` (default `1000`) — the number of recombination simulations. More reps
