@@ -103,6 +103,16 @@ Across all four designs you can set:
   larger samples;
 * `n_treated` — how many of those units are treated (may likewise exceed the
   observed treated count);
+* `het` (default `NULL` = constant effect) — assess **heterogeneous treatment
+  effects**. Supply an equal-probability set of per-unit effect multipliers,
+  e.g. `het = c(0, 2)` (the effect is absent in half the units and doubled in
+  the other half), or a `function(n)` drawing multipliers. The effect axis
+  stays the *average* effect (multipliers are normalised to mean 1), the
+  returned power curve and MDE reflect the heterogeneity, and the
+  constant-effect counterpart is stored in `extras$het` and printed alongside
+  for comparison. The null simulations are shared with the constant-effect
+  setup (bit-identical draws, unchanged test size), and the heterogeneous
+  sweep is exact — no bootstrapping across effect sizes;
 * `reps` (default `1000`) — the number of recombination simulations. More reps
   give a smoother power curve and a more precise MDE; they do **not** change the
   answer in expectation (no bias), only the Monte-Carlo noise around it. Start

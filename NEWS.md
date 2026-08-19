@@ -1,5 +1,36 @@
 # simpower 0.2.1
 
+* **New: heterogeneous treatment effects (`het`), in all four designs.** The
+  default sweep injects the same effect into every unit; real effects rarely
+  work that way, and heterogeneity costs power. `het` quantifies that cost:
+  supply an equal-probability multiset of per-unit effect multipliers (e.g.
+  `het = c(0, 2)` -- the effect is absent in half the units and doubled in the
+  other half) or a `function(n)` drawing multipliers. Multiplier vectors are
+  normalised to mean one, so the effect axis remains the *average* effect and
+  the curves are directly comparable to the constant-effect case; `$power` and
+  `$mde` then reflect the heterogeneous effect and `extras$het` stores the
+  constant-effect counterpart (printed alongside for comparison). No
+  bootstrapping over effect sizes is needed: every estimator is linear in the
+  outcome and every SE is a sandwich, so injecting `e * m_i` shifts the tested
+  coefficient by exactly `e * lambda` (one extra projection per rep) and moves
+  its sandwich variance along an exact quadratic in `e` -- the heterogeneous
+  power curve stays a cheap post-processing sweep, verified in the test suite
+  against literal refitting to 1e-10. Multipliers are drawn per unit (per
+  cluster in IV/RDD, per observation without an id) on an isolated RNG stream,
+  so the simulated null draws are bit-identical to a run without `het` and the
+  realized test size is unchanged. In `power_event()` the heterogeneity
+  applies to the overall shaped-exposure coefficient (the per-horizon table
+  keeps its constant-effect interpretation); the RDD bandwidth sweep and
+  hypothetical-instrument IV mode are heterogeneity-aware as well. Because the
+  injected heterogeneity inflates the estimated SE as the effect grows, power
+  can saturate below 1: the per-run **power ceiling** is reported
+  (`extras$het$power_ceiling`, shown by `print()`), the effect grid
+  auto-extends while targets remain attainable, and an unreachable target
+  triggers an explicit "power plateaus at ~X; a larger sample, not a larger
+  effect, is needed" warning. Validated against a full bootstrap that
+  literally refits at every effect size: identical power curves (exact zero
+  difference) for TWFE, panel IV, and RDD on public data.
+
 * **`n_units` / `n_treated` may now exceed the sample ("would collecting more
   data help?").** Previously a request beyond the observed number of units was
   silently capped at what the data contain, so sample-size planning could only
