@@ -53,11 +53,13 @@ power_event <- function(data, y, id, time, treat = NULL, cohort = NULL,
                         reps = 1000, emax = NULL, step = NULL,
                         alpha = 0.05, alternative = c("greater", "two.sided", "less"),
                         crit_method = c("empirical", "normal"),
-                        power_targets = c(0.8, 0.9), seed = 5000) {
+                        power_targets = c(0.8, 0.9), seed = 5000, het = NULL) {
   shape <- match.arg(shape)
   alternative <- match.arg(alternative)
   crit_method <- match.arg(crit_method)
   cl <- match.call()
+  hspec <- .het_check(het)
+  henv  <- if (!is.null(hspec)) .het_new_stream(seed)
 
   yv  <- .numcol(data, y, "y")
   idv <- .col(data, id, "id")
@@ -146,12 +148,13 @@ power_event <- function(data, y, id, time, treat = NULL, cohort = NULL,
   sd_y <- stats::sd(yv - stats::ave(yv, uid))            # within-unit SD of Y
 
   one_rep <- function() {
-    sm <- .subsample_units(uid, treated_ids, n_units, n_treated)
-    u  <- as.integer(factor(uid[sm])); t <- as.integer(factor(ti[sm]))
+    ss <- .subsample_units(uid, treated_ids, n_units, n_treated)
+    sm <- ss$rows
+    u  <- as.integer(factor(ss$uid)); t <- as.integer(factor(ti[sm]))
     ys <- yv[sm]; Ds <- Dmat[sm, , drop = FALSE]; Ps <- Pexp[sm]
     Ws <- if (is.null(W)) NULL else W[sm, , drop = FALSE]
 
-    rec  <- .recombine_panel(ys, u, t)
+    rec  <- .recombine_panel_ctrl(ys, u, t, Ws)
     keep <- rec$keep
     yk <- rec$y[keep]
     uk <- as.integer(factor(u[keep])); tk <- as.integer(factor(t[keep]))
@@ -160,7 +163,11 @@ power_event <- function(data, y, id, time, treat = NULL, cohort = NULL,
 
     ## overall (shaped exposure) and dynamic (per-horizon) fits share the same
     ## unit + time absorbing step, so demean once and split (see .fit_event_combined).
-    fit <- .fit_event_combined(yk, Pk, Dk, uk, tk, Wk)
+    ## Heterogeneity is injected into the OVERALL shaped-exposure coefficient;
+    ## the per-horizon MDE table keeps the constant-effect interpretation.
+    inj <- if (is.null(hspec)) NULL else
+      .het_draw(hspec, length(unique(uk)), henv)[uk] * Pk
+    fit <- .fit_event_combined(yk, Pk, Dk, uk, tk, Wk, inject = inj)
     bpost  <- fit$b[post_cols];  sepost <- fit$se[post_cols]
 
     coef <- c(overall = unname(fit$ov["b"]), stats::setNames(bpost, .knm(Kpost)))
@@ -168,7 +175,8 @@ power_event <- function(data, y, id, time, treat = NULL, cohort = NULL,
     ## treated units contributing a post-treatment obs after recombination
     ntr <- length(unique(uk[Pk != 0]))
     list(coef = coef, se = se,
-         diag = c(units = length(unique(uk)), treated = ntr))
+         diag = c(units = length(unique(uk)), treated = ntr),
+         het  = if (!is.null(hspec)) fit$ov_het)
   }
 
   sim <- .run_sim(one_rep, reps, seed)
@@ -176,9 +184,12 @@ power_event <- function(data, y, id, time, treat = NULL, cohort = NULL,
   ## overall curve
   bs <- sim$B[, "overall"]; ses <- sim$S[, "overall"]
   .warn_dropped(bs, ses, reps)
-  grid  <- auto_grid(ses, emax, step)
-  power <- power_from_null(bs, ses, grid, alpha, alternative, crit_method)
-  mde   <- mde_targets(grid, power, power_targets)
+  grid  <- auto_grid(ses, emax, step, widen = !is.null(hspec))
+  hc    <- .het_curves(bs, ses, sim$H, grid, alpha, alternative, crit_method,
+                       power_targets, hspec, auto_extend = is.null(emax))
+  power <- hc$power
+  mde   <- hc$mde
+  grid  <- hc$grid
 
   ## per-horizon MDE (each horizon on its own grid)
   th1 <- power_targets[1]
@@ -221,7 +232,8 @@ power_event <- function(data, y, id, time, treat = NULL, cohort = NULL,
     request = list(n_units = n_units, n_treated = n_treated, controls = controls,
                    shape = shape, y = y, id = id, time = time),
     sample_check = sample_check,
-    extras = list(shape = shape, horizon = horizon, H = H, Kpost = Kpost, sd_y = sd_y),
+    extras = list(shape = shape, horizon = horizon, H = H, Kpost = Kpost,
+                  sd_y = sd_y, het = hc$extras),
     data = data
   )
 }
@@ -231,26 +243,32 @@ power_event <- function(data, y, id, time, treat = NULL, cohort = NULL,
 ## we demean [exposure, event dummies, controls, y] once and run the two OLS
 ## fits on the appropriate column blocks. Numerically identical to fitting them
 ## separately (demeaning is linear), at roughly half the absorbing cost.
-.fit_event_combined <- function(y, Pexp, Dmat, uid, ti, Xextra = NULL) {
+.fit_event_combined <- function(y, Pexp, Dmat, uid, ti, Xextra = NULL,
+                                inject = NULL) {
   G <- length(unique(uid)); Tn <- length(unique(ti))
   kd <- ncol(Dmat)
   wc <- if (is.null(Xextra)) 0L else ncol(as.matrix(Xextra))
-  M  <- cbind(Pexp, Dmat, Xextra, y)
+  M  <- cbind(Pexp, Dmat, Xextra, y, inject)
   Md <- .demean_twoway(M, uid, ti)
   Pd <- Md[, 1L, drop = FALSE]
   Dd <- Md[, 1L + seq_len(kd), drop = FALSE]
   Wd <- if (wc) Md[, 1L + kd + seq_len(wc), drop = FALSE] else NULL
-  yd <- Md[, ncol(Md)]
+  yd <- Md[, 1L + kd + wc + 1L]
+  dj <- if (is.null(inject)) NULL else Md[, 1L + kd + wc + 2L]
 
-  fov <- .ols_vcov(cbind(Pd, Wd), yd, cluster = uid, dfK = G + Tn + 1L + wc)
+  fov <- .ols_vcov(cbind(Pd, Wd), yd, cluster = uid, dfK = G + Tn + 1L + wc,
+                   inject = dj)
   ov  <- if (is.null(fov)) c(b = NA_real_, se = NA_real_)
          else c(b = fov$beta[1L], se = sqrt(max(fov$V[1L, 1L], 0)))
+  ov_het <- if (is.null(inject)) NULL
+            else if (is.null(fov)) c(lam = NA_real_, v1 = NA_real_, v2 = NA_real_)
+            else fov$het
 
   fdy <- .ols_vcov(cbind(Dd, Wd), yd, cluster = uid, dfK = G + Tn + kd + wc)
   if (is.null(fdy)) { b <- rep(NA_real_, kd); se <- rep(NA_real_, kd) }
   else { b <- fdy$beta[seq_len(kd)]; se <- sqrt(pmax(diag(fdy$V)[seq_len(kd)], 0)) }
 
-  list(ov = ov, b = b, se = se)
+  list(ov = ov, b = b, se = se, ov_het = ov_het)
 }
 
 ## dynamic event-study fit: coefficients on the event-time dummies in Dmat,

@@ -18,12 +18,21 @@
 #' @param time Column name of the time variable.
 #' @param controls Optional character vector of control-variable column names.
 #'   Factors/characters are expanded to dummies. Controls are partialled out in
-#'   every simulated fit.
+#'   every simulated fit, and the recombination preserves their predicted
+#'   component of the outcome (only the control-purged residual is recombined
+#'   across units), so the simulated SEs -- and the MDE -- reflect the
+#'   efficiency gain from controls that predict the outcome.
 #' @param n_units Optional. Total number of units to draw for each simulated
-#'   sample. When `NULL` the full sample is used.
+#'   sample. When `NULL` the full sample is used. May **exceed** the number of
+#'   units in the data ("would collecting more data help?"): the surplus is
+#'   drawn by replicating observed units, each copy entering as its own
+#'   cluster (a cluster bootstrap), so the extrapolation assumes additional
+#'   units would look like those already observed.
 #' @param n_treated Optional. Number of treated units (units with within-unit
 #'   variation in `x`) to draw per simulated sample. When `NULL` (and `n_units`
-#'   is given) the observed treated share is preserved.
+#'   is given) the observed treated share is preserved. Like `n_units`, may
+#'   exceed the observed treated count; if `n_units` is left `NULL`, the total
+#'   grows so that all control units are kept.
 #' @param reps Number of simulations (curve smoothness; does not affect bias).
 #' @param emax,step Optional largest effect size and grid step on the power
 #'   curve. When `NULL` they are chosen automatically from the null SE scale.
@@ -37,6 +46,27 @@
 #'   Gaussian quantile (the previous behaviour).
 #' @param power_targets Power levels at which to report the MDE.
 #' @param seed Random seed (for reproducibility).
+#' @param het Optional **heterogeneous-effects** specification (default `NULL`
+#'   = the usual constant effect). Real effects rarely hit every unit equally,
+#'   and heterogeneity costs power; `het` quantifies that cost. Supply either a
+#'   numeric vector interpreted as an equal-probability set of per-unit effect
+#'   multipliers -- e.g. `het = c(0, 2)`: the effect is absent in half the
+#'   units and doubled in the other half -- or a `function(n)` returning `n`
+#'   multipliers (e.g. `function(n) rlnorm(n, -0.32, 0.8)`). Multiplier
+#'   vectors are normalised to mean one, so the effect axis remains the
+#'   **average** effect and curves are directly comparable to the constant
+#'   case. Each rep draws fresh multipliers per unit (per cluster in IV/RDD;
+#'   per observation when there is no id) on an isolated RNG stream, so the
+#'   simulated null draws are bit-identical to a run without `het` (common
+#'   random numbers). Because all estimators are linear in the outcome and all
+#'   SEs are sandwiches, the heterogeneous injection is evaluated *exactly* --
+#'   the coefficient shifts by `e * lambda` and the variance is quadratic in
+#'   `e` -- with no refitting across effect sizes. The returned `$power` and
+#'   `$mde` reflect the heterogeneous effect; `extras$het` stores the
+#'   constant-effect curve and MDE for comparison. In `power_event()` the
+#'   heterogeneity applies to the overall shaped-exposure coefficient (the
+#'   per-horizon table keeps the constant interpretation); realized test size
+#'   is unchanged (at effect 0 the two setups coincide).
 #' @param use_fixest If `TRUE` and the \pkg{fixest} package is installed, use
 #'   `fixest::feols()` for the real-data point estimate reported in
 #'   `extras$estimate`; otherwise the internal within-estimator (which matches
@@ -57,10 +87,12 @@ power_twfe <- function(data, y, x, id, time, controls = NULL,
                        alpha = 0.05, alternative = c("greater", "two.sided", "less"),
                        crit_method = c("empirical", "normal"),
                        power_targets = c(0.8, 0.9), seed = 5000,
-                       use_fixest = TRUE) {
+                       use_fixest = TRUE, het = NULL) {
   alternative <- match.arg(alternative)
   crit_method <- match.arg(crit_method)
   cl <- match.call()
+  hspec <- .het_check(het)
+  henv  <- if (!is.null(hspec)) .het_new_stream(seed)
 
   yv <- .numcol(data, y, "y")
   xv <- .numcol(data, x, "x")
@@ -82,32 +114,39 @@ power_twfe <- function(data, y, x, id, time, controls = NULL,
   sd_y <- stats::sd(yv - stats::ave(yv, uid_full))       # within-unit SD of Y
 
   one_rep <- function() {
-    sm <- .subsample_units(uid_full, treated_ids, n_units, n_treated)
-    u  <- as.integer(factor(uid_full[sm]))
+    ss <- .subsample_units(uid_full, treated_ids, n_units, n_treated)
+    sm <- ss$rows
+    u  <- as.integer(factor(ss$uid))
     t  <- as.integer(factor(ti_full[sm]))
     xs <- xv[sm]; ys <- yv[sm]
     Ws <- if (is.null(W)) NULL else W[sm, , drop = FALSE]
 
-    rec  <- .recombine_panel(ys, u, t)
+    rec  <- .recombine_panel_ctrl(ys, u, t, Ws)
     keep <- rec$keep
     yk <- rec$y[keep]
     uk <- as.integer(factor(u[keep])); tk <- as.integer(factor(t[keep]))
     xk <- xs[keep]
     Wk <- if (is.null(Ws)) NULL else Ws[keep, , drop = FALSE]
 
-    est <- .fit_twfe(yk, xk, uk, tk, Wk)
+    inj <- if (is.null(hspec)) NULL else
+      .het_draw(hspec, length(unique(uk)), henv)[uk] * xk
+    est <- .fit_twfe(yk, xk, uk, tk, Wk, inject = inj)
     rng <- tapply(xk, uk, function(v) diff(range(v)))
     list(coef = c(effect = unname(est["b"])),
          se   = c(effect = unname(est["se"])),
-         diag = c(units = length(unique(uk)), treated = sum(rng > 0)))
+         diag = c(units = length(unique(uk)), treated = sum(rng > 0)),
+         het  = if (!is.null(hspec)) est[c("lam", "v1", "v2")])
   }
 
   sim <- .run_sim(one_rep, reps, seed)
   bs <- sim$B[, 1]; ses <- sim$S[, 1]
   .warn_dropped(bs, ses, reps)
-  grid  <- auto_grid(ses, emax, step)
-  power <- power_from_null(bs, ses, grid, alpha, alternative, crit_method)
-  mde   <- mde_targets(grid, power, power_targets)
+  grid  <- auto_grid(ses, emax, step, widen = !is.null(hspec))
+  hc    <- .het_curves(bs, ses, sim$H, grid, alpha, alternative, crit_method,
+                       power_targets, hspec, auto_extend = is.null(emax))
+  power <- hc$power
+  mde   <- hc$mde
+  grid  <- hc$grid
 
   ## real-data point estimate + clustered SE (diagnostic only)
   ref <- .twfe_reference(yv, xv, uid_full, ti_full, W, use_fixest)
@@ -129,7 +168,8 @@ power_twfe <- function(data, y, x, id, time, controls = NULL,
                    y = y, x = x, id = id, time = time),
     sample_check = sample_check,
     extras = list(use_fixest = use_fixest, sd_y = sd_y,
-                  estimate = ref$estimate, estimator = ref$source),
+                  estimate = ref$estimate, estimator = ref$source,
+                  het = hc$extras),
     data = data
   )
 }

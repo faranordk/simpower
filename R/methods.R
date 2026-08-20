@@ -30,6 +30,16 @@ print.simpower <- function(x, ...) {
                 x$null$b_mean, x$null$se_mean))
     mline <- paste(sprintf("%s power = %.3g", names(x$mde), x$mde), collapse = "   ")
     cat(sprintf("  MDE:  %s\n", mline))
+    if (!is.null(x$extras$het) && !is.null(x$extras$het$mde_constant)) {
+      cat(sprintf("  heterogeneous effects: %s\n", x$extras$het$label))
+      pc <- x$extras$het$power_ceiling
+      if (!is.null(pc) && is.finite(pc) && pc < 0.995) {
+        cat(sprintf("  power ceiling under this heterogeneity: %.2f\n", pc))
+      }
+      mc <- x$extras$het$mde_constant
+      cat(sprintf("  MDE if constant (for comparison):  %s\n",
+                  paste(sprintf("%s power = %.3g", names(mc), mc), collapse = "   ")))
+    }
     if (!is.null(sdy) && is.finite(sdy) && sdy > 0) {
       sline <- paste(sprintf("%s power = %.3g", names(x$mde), x$mde / sdy), collapse = "   ")
       cat(sprintf("  MDE (SD units):  %s   [within-SD of Y = %.4g]\n", sline, sdy))

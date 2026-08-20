@@ -64,10 +64,12 @@ power_iv <- function(data, y, d, z = NULL, id = NULL, time = NULL, controls = NU
                      reps = 1000, emax = NULL, step = NULL,
                      alpha = 0.05, alternative = c("greater", "two.sided", "less"),
                      crit_method = c("empirical", "normal"),
-                     power_targets = c(0.8, 0.9), seed = 5000) {
+                     power_targets = c(0.8, 0.9), seed = 5000, het = NULL) {
   alternative <- match.arg(alternative)
   crit_method <- match.arg(crit_method)
   cl <- match.call()
+  hspec <- .het_check(het)
+  henv  <- if (!is.null(hspec)) .het_new_stream(seed)
 
   hypo <- !is.null(L)
   if (hypo && !is.null(z)) {
@@ -132,11 +134,12 @@ power_iv <- function(data, y, d, z = NULL, id = NULL, time = NULL, controls = NU
   Eexog <- W
 
   one_rep <- function() {
-    sm <- .subsample_units(uid, treated_ids, n_units, n_treated)
+    ss <- .subsample_units(uid, treated_ids, n_units, n_treated)
+    sm <- ss$rows
     ys <- yv[sm]; ds <- dv[sm]
     Zs <- if (is.null(Z)) NULL else Z[sm, , drop = FALSE]
     Ws <- if (is.null(W)) NULL else W[sm, , drop = FALSE]
-    us <- as.integer(factor(uid[sm]))
+    us <- as.integer(factor(ss$uid))
 
     if (hypo) {
       ## Hypothetical-instrument mode. Impose the null on y (residual
@@ -149,40 +152,52 @@ power_iv <- function(data, y, d, z = NULL, id = NULL, time = NULL, controls = NU
       yk  <- .recombine_resid(ys, Ek)
       Lp  <- sample(Lv[sm])
       clu <- if (!is.null(idv)) us else NULL
+      inj <- if (is.null(hspec)) NULL else
+        .het_draw(hspec, length(unique(us)), henv)[us] * ds
+      tmpl <- if (is.null(hspec)) c(b = 0, se = 0)
+              else c(b = 0, se = 0, lam = 0, v1 = 0, v2 = 0)
       est <- vapply(rho, function(r) {
         zr <- .synth_instrument(ds, Lp, r)
-        if (is.null(zr)) return(c(b = NA_real_, se = NA_real_))
-        .fit_tsls(yk, ds, matrix(zr, ncol = 1L), Ws, cluster = clu)
-      }, c(b = 0, se = 0))
+        if (is.null(zr)) return(tmpl + NA_real_)
+        .fit_tsls(yk, ds, matrix(zr, ncol = 1L), Ws, cluster = clu, inject = inj)
+      }, tmpl)
       nm <- .rnm(rho)
       return(list(coef = stats::setNames(est["b", ], nm),
                   se   = stats::setNames(est["se", ], nm),
                   diag = c(units = length(unique(us)),
                            treated = sum(tapply(ds, us, is_trt_unit)),
-                           nobs = length(ys))))
+                           nobs = length(ys)),
+                  het  = if (!is.null(hspec)) stats::setNames(
+                    as.vector(est[c("lam", "v1", "v2"), ]),
+                    paste(rep(nm, each = 3L), c("lam", "v1", "v2"), sep = "."))))
     }
 
     if (has_panel) {
       ts  <- as.integer(factor(ti[sm]))
-      rec <- .recombine_panel(ys, us, ts)
+      rec <- .recombine_panel_ctrl(ys, us, ts, Ws, fe = FALSE)  # .fit_tsls has no FEs
       keep <- rec$keep
       yk <- rec$y[keep]; dk <- ds[keep]; Zk <- Zs[keep, , drop = FALSE]
       Wk <- if (is.null(Ws)) NULL else Ws[keep, , drop = FALSE]
       uk <- as.integer(factor(us[keep]))
-      est <- .fit_tsls(yk, dk, Zk, Wk, cluster = uk)
+      inj <- if (is.null(hspec)) NULL else
+        .het_draw(hspec, length(unique(uk)), henv)[uk] * dk
+      est <- .fit_tsls(yk, dk, Zk, Wk, cluster = uk, inject = inj)
       ntreat <- sum(tapply(dk, uk, is_trt_unit))
       nunit  <- length(unique(uk))
     } else {
       Ek <- if (is.null(Ws)) NULL else Ws
       yk <- .recombine_resid(ys, Ek)
       clu <- if (!is.null(idv)) us else NULL
-      est <- .fit_tsls(yk, ds, Zs, Ws, cluster = clu)
+      inj <- if (is.null(hspec)) NULL else
+        .het_draw(hspec, length(unique(us)), henv)[us] * ds
+      est <- .fit_tsls(yk, ds, Zs, Ws, cluster = clu, inject = inj)
       ntreat <- sum(tapply(ds, us, is_trt_unit))
       nunit  <- length(unique(us))
     }
     list(coef = c(effect = unname(est["b"])),
          se   = c(effect = unname(est["se"])),
-         diag = c(units = nunit, treated = ntreat))
+         diag = c(units = nunit, treated = ntreat),
+         het  = if (!is.null(hspec)) est[c("lam", "v1", "v2")])
   }
 
   sim <- .run_sim(one_rep, reps, seed)
@@ -197,12 +212,17 @@ power_iv <- function(data, y, d, z = NULL, id = NULL, time = NULL, controls = NU
     ## One curve + MDE row per rho, on a common effect grid (scaled to the
     ## weakest instrument so every curve is fully visible).
     .warn_dropped(sim$B, sim$S, reps * length(rho))
-    grid <- auto_grid(sim$S[, 1L], emax, step)
+    grid <- auto_grid(sim$S[, 1L], emax, step, widen = !is.null(hspec))
     curves <- lapply(seq_along(rho), function(j) {
-      data.frame(effect = grid,
-                 power  = power_from_null(sim$B[, j], sim$S[, j], grid,
-                                          alpha, alternative, crit_method),
-                 rho    = rho[j])
+      pj <- if (is.null(hspec)) {
+        power_from_null(sim$B[, j], sim$S[, j], grid,
+                        alpha, alternative, crit_method)
+      } else {
+        power_from_null_het(sim$B[, j], sim$S[, j],
+                            sim$H[, 3L * (j - 1L) + 1:3, drop = FALSE], grid,
+                            alpha, alternative, crit_method)
+      }
+      data.frame(effect = grid, power = pj, rho = rho[j])
     })
     power_df <- do.call(rbind, curves)
     mde_df <- cbind(
@@ -227,16 +247,21 @@ power_iv <- function(data, y, d, z = NULL, id = NULL, time = NULL, controls = NU
       sample_check = sample_check,
       extras = list(estimate = c(b = NA_real_, se = NA_real_),
                     first_stage_F = Fimp, rho = rho, L = L,
-                    clustered = !is.null(idv), panel = FALSE, sd_y = sd_y),
+                    clustered = !is.null(idv), panel = FALSE, sd_y = sd_y,
+                    het = if (!is.null(hspec)) list(label = .het_label(hspec),
+                                                    spec = hspec$spec)),
       data = data
     ))
   }
 
   bs <- sim$B[, 1]; ses <- sim$S[, 1]
   .warn_dropped(bs, ses, reps)
-  grid  <- auto_grid(ses, emax, step)
-  power <- power_from_null(bs, ses, grid, alpha, alternative, crit_method)
-  mde   <- mde_targets(grid, power, power_targets)
+  grid  <- auto_grid(ses, emax, step, widen = !is.null(hspec))
+  hc    <- .het_curves(bs, ses, sim$H, grid, alpha, alternative, crit_method,
+                       power_targets, hspec, auto_extend = is.null(emax))
+  power <- hc$power
+  mde   <- hc$mde
+  grid  <- hc$grid
 
   ## real-data reference: 2SLS estimate + first-stage F (diagnostics only)
   ref <- .iv_reference(yv, dv, Z, W, if (!is.null(idv)) uid else NULL)
@@ -250,7 +275,8 @@ power_iv <- function(data, y, d, z = NULL, id = NULL, time = NULL, controls = NU
                    y = y, d = d, z = z, id = id, time = time),
     sample_check = sample_check,
     extras = list(estimate = ref$estimate, first_stage_F = ref$F,
-                  clustered = !is.null(idv), panel = has_panel, sd_y = sd_y),
+                  clustered = !is.null(idv), panel = has_panel, sd_y = sd_y,
+                  het = hc$extras),
     data = data
   )
 }

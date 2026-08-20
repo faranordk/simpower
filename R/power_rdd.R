@@ -52,11 +52,13 @@ power_rdd <- function(data, y, run, cutoff = 0, controls = NULL,
                       alpha = 0.05, alternative = c("greater", "two.sided", "less"),
                       crit_method = c("empirical", "normal"),
                       power_targets = c(0.8, 0.9), seed = 5000,
-                      use_rdrobust = TRUE) {
+                      use_rdrobust = TRUE, het = NULL) {
   alternative <- match.arg(alternative)
   kernel <- match.arg(kernel)
   crit_method <- match.arg(crit_method)
   cl <- match.call()
+  hspec <- .het_check(het)
+  henv  <- if (!is.null(hspec)) .het_new_stream(seed)
 
   yv  <- .numcol(data, y, "y")
   rv  <- .numcol(data, run, "run")
@@ -88,11 +90,12 @@ power_rdd <- function(data, y, run, cutoff = 0, controls = NULL,
   ## one simulation run at a given bandwidth
   rdd_run <- function(hh, R, sd) {
     one_rep <- function() {
-      sm   <- .subsample_units(uid, treated_ids, n_units, n_treated)
-      mask <- sm & (abs(run_c) <= hh)
+      ss   <- .subsample_units(uid, treated_ids, n_units, n_treated)
+      inbw <- abs(run_c[ss$rows]) <= hh
+      mask <- ss$rows[inbw]
       rc <- run_c[mask]; tr <- treat[mask]; y0 <- yv[mask]
       Wk <- if (is.null(W)) NULL else W[mask, , drop = FALSE]
-      uk <- uid[mask]
+      uk <- ss$uid[inbw]
       ## Diagnostics, all in consistent user-facing units:
       ##   units   -- clusters in the window when `id` is given, else obs
       ##   treated -- treated *units* on the same scale as `units` (and as the
@@ -104,15 +107,23 @@ power_rdd <- function(data, y, run, cutoff = 0, controls = NULL,
         nobs    = length(y0))
       if (length(unique(tr)) < 2L || length(y0) < 5L) {
         return(list(coef = c(effect = NA_real_), se = c(effect = NA_real_),
-                    diag = dg()))
+                    diag = dg(),
+                    het = if (!is.null(hspec)) c(lam = NA_real_, v1 = NA_real_,
+                                                 v2 = NA_real_)))
       }
       w  <- if (kernel == "uniform") rep(1, length(rc)) else pmax(0, 1 - abs(rc) / hh)
       Eexog <- cbind(rc, tr * rc, Wk)
       yk <- .recombine_resid(y0, Eexog)
-      est <- .fit_rdd(yk, rc, tr, w, Wk, cluster = if (has_id) uk else NULL)
+      inj <- if (is.null(hspec)) NULL else {
+        ui <- as.integer(factor(uk))       # clusters when `id` is given, else obs
+        .het_draw(hspec, max(ui), henv)[ui] * tr
+      }
+      est <- .fit_rdd(yk, rc, tr, w, Wk, cluster = if (has_id) uk else NULL,
+                      inject = inj)
       list(coef = c(effect = unname(est["b"])),
            se   = c(effect = unname(est["se"])),
-           diag = dg())
+           diag = dg(),
+           het  = if (!is.null(hspec)) est[c("lam", "v1", "v2")])
     }
     .run_sim(one_rep, R, sd)
   }
@@ -121,9 +132,12 @@ power_rdd <- function(data, y, run, cutoff = 0, controls = NULL,
   sim <- rdd_run(h, reps, seed)
   bs <- sim$B[, 1]; ses <- sim$S[, 1]
   .warn_dropped(bs, ses, reps)
-  grid  <- auto_grid(ses, emax, step)
-  power <- power_from_null(bs, ses, grid, alpha, alternative, crit_method)
-  mde   <- mde_targets(grid, power, power_targets)
+  grid  <- auto_grid(ses, emax, step, widen = !is.null(hspec))
+  hc    <- .het_curves(bs, ses, sim$H, grid, alpha, alternative, crit_method,
+                       power_targets, hspec, auto_extend = is.null(emax))
+  power <- hc$power
+  mde   <- hc$mde
+  grid  <- hc$grid
 
   ## MDE-versus-bandwidth sweep
   if (is.null(bw_grid)) {
@@ -134,8 +148,9 @@ power_rdd <- function(data, y, run, cutoff = 0, controls = NULL,
     hh <- bw_grid[i]
     s  <- rdd_run(hh, bw_reps, seed + i)
     b  <- s$B[, 1]; se <- s$S[, 1]
-    g  <- auto_grid(se, NULL, NULL)
-    p  <- power_from_null(b, se, g, alpha, alternative, crit_method)
+    g  <- auto_grid(se, NULL, NULL, widen = !is.null(hspec))
+    p  <- if (is.null(hspec)) power_from_null(b, se, g, alpha, alternative, crit_method)
+          else power_from_null_het(b, se, s$H, g, alpha, alternative, crit_method)
     m <- mde_from_curve(g, p, th1)
     data.frame(bandwidth = hh,
                n_in_bw   = mean(s$D[, "nobs"]),   # observations, as the name says
@@ -165,7 +180,8 @@ power_rdd <- function(data, y, run, cutoff = 0, controls = NULL,
     request = list(n_units = n_units, n_treated = n_treated, controls = controls,
                    y = y, run = run, cutoff = cutoff, bandwidth = h),
     sample_check = sample_check,
-    extras = list(h = h, bw_source = bwsel$source, bandwidth = bandwidth_tbl, sd_y = sd_y),
+    extras = list(h = h, bw_source = bwsel$source, bandwidth = bandwidth_tbl,
+                  sd_y = sd_y, het = hc$extras),
     data = data
   )
 }
