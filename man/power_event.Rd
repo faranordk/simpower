@@ -24,7 +24,8 @@ power_event(
   alternative = c("greater", "two.sided", "less"),
   crit_method = c("empirical", "normal"),
   power_targets = c(0.8, 0.9),
-  seed = 5000
+  seed = 5000,
+  het = NULL
 )
 }
 \arguments{
@@ -44,7 +45,10 @@ same scale as \code{time}); never-treated units take \code{NA}/\code{Inf}.}
 
 \item{controls}{Optional character vector of control-variable column names.
 Factors/characters are expanded to dummies. Controls are partialled out in
-every simulated fit.}
+every simulated fit, and the recombination preserves their predicted
+component of the outcome (only the control-purged residual is recombined
+across units), so the simulated SEs -- and the MDE -- reflect the
+efficiency gain from controls that predict the outcome.}
 
 \item{shape}{Assumed shape of the true effect path over post-treatment
 horizons: \code{"constant"}, \code{"increasing"}, or \code{"decreasing"}.}
@@ -57,7 +61,11 @@ capped at 20).}
 (default: up to 5). Horizon \code{-1} is always the omitted baseline.}
 
 \item{n_units}{Optional. Total number of units to draw for each simulated
-sample. When \code{NULL} the full sample is used.}
+sample. When \code{NULL} the full sample is used. May \strong{exceed} the number of
+units in the data ("would collecting more data help?"): the surplus is
+drawn by replicating observed units, each copy entering as its own
+cluster (a cluster bootstrap), so the extrapolation assumes additional
+units would look like those already observed.}
 
 \item{n_treated}{Number of eventually-treated units to draw per simulated
 sample (see \code{\link[=power_twfe]{power_twfe()}}).}
@@ -81,6 +89,28 @@ Gaussian quantile (the previous behaviour).}
 \item{power_targets}{Power levels at which to report the MDE.}
 
 \item{seed}{Random seed (for reproducibility).}
+
+\item{het}{Optional \strong{heterogeneous-effects} specification (default \code{NULL}
+= the usual constant effect). Real effects rarely hit every unit equally,
+and heterogeneity costs power; \code{het} quantifies that cost. Supply either a
+numeric vector interpreted as an equal-probability set of per-unit effect
+multipliers -- e.g. \code{het = c(0, 2)}: the effect is absent in half the
+units and doubled in the other half -- or a \verb{function(n)} returning \code{n}
+multipliers (e.g. \code{function(n) rlnorm(n, -0.32, 0.8)}). Multiplier
+vectors are normalised to mean one, so the effect axis remains the
+\strong{average} effect and curves are directly comparable to the constant
+case. Each rep draws fresh multipliers per unit (per cluster in IV/RDD;
+per observation when there is no id) on an isolated RNG stream, so the
+simulated null draws are bit-identical to a run without \code{het} (common
+random numbers). Because all estimators are linear in the outcome and all
+SEs are sandwiches, the heterogeneous injection is evaluated \emph{exactly} --
+the coefficient shifts by \code{e * lambda} and the variance is quadratic in
+\code{e} -- with no refitting across effect sizes. The returned \verb{$power} and
+\verb{$mde} reflect the heterogeneous effect; \code{extras$het} stores the
+constant-effect curve and MDE for comparison. In \code{power_event()} the
+heterogeneity applies to the overall shaped-exposure coefficient (the
+per-horizon table keeps the constant interpretation); realized test size
+is unchanged (at effect 0 the two setups coincide).}
 }
 \value{
 An object of class \code{"simpower"} (design \code{"event"}). Its \code{extras$horizon}

@@ -21,7 +21,8 @@ power_twfe(
   crit_method = c("empirical", "normal"),
   power_targets = c(0.8, 0.9),
   seed = 5000,
-  use_fixest = TRUE
+  use_fixest = TRUE,
+  het = NULL
 )
 }
 \arguments{
@@ -38,14 +39,23 @@ coefficient is tested.}
 
 \item{controls}{Optional character vector of control-variable column names.
 Factors/characters are expanded to dummies. Controls are partialled out in
-every simulated fit.}
+every simulated fit, and the recombination preserves their predicted
+component of the outcome (only the control-purged residual is recombined
+across units), so the simulated SEs -- and the MDE -- reflect the
+efficiency gain from controls that predict the outcome.}
 
 \item{n_units}{Optional. Total number of units to draw for each simulated
-sample. When \code{NULL} the full sample is used.}
+sample. When \code{NULL} the full sample is used. May \strong{exceed} the number of
+units in the data ("would collecting more data help?"): the surplus is
+drawn by replicating observed units, each copy entering as its own
+cluster (a cluster bootstrap), so the extrapolation assumes additional
+units would look like those already observed.}
 
 \item{n_treated}{Optional. Number of treated units (units with within-unit
 variation in \code{x}) to draw per simulated sample. When \code{NULL} (and \code{n_units}
-is given) the observed treated share is preserved.}
+is given) the observed treated share is preserved. Like \code{n_units}, may
+exceed the observed treated count; if \code{n_units} is left \code{NULL}, the total
+grows so that all control units are kept.}
 
 \item{reps}{Number of simulations (curve smoothness; does not affect bias).}
 
@@ -71,6 +81,28 @@ Gaussian quantile (the previous behaviour).}
 \code{fixest::feols()} for the real-data point estimate reported in
 \code{extras$estimate}; otherwise the internal within-estimator (which matches
 \code{feols}) is used. The simulation itself always uses the internal estimator.}
+
+\item{het}{Optional \strong{heterogeneous-effects} specification (default \code{NULL}
+= the usual constant effect). Real effects rarely hit every unit equally,
+and heterogeneity costs power; \code{het} quantifies that cost. Supply either a
+numeric vector interpreted as an equal-probability set of per-unit effect
+multipliers -- e.g. \code{het = c(0, 2)}: the effect is absent in half the
+units and doubled in the other half -- or a \verb{function(n)} returning \code{n}
+multipliers (e.g. \code{function(n) rlnorm(n, -0.32, 0.8)}). Multiplier
+vectors are normalised to mean one, so the effect axis remains the
+\strong{average} effect and curves are directly comparable to the constant
+case. Each rep draws fresh multipliers per unit (per cluster in IV/RDD;
+per observation when there is no id) on an isolated RNG stream, so the
+simulated null draws are bit-identical to a run without \code{het} (common
+random numbers). Because all estimators are linear in the outcome and all
+SEs are sandwiches, the heterogeneous injection is evaluated \emph{exactly} --
+the coefficient shifts by \code{e * lambda} and the variance is quadratic in
+\code{e} -- with no refitting across effect sizes. The returned \verb{$power} and
+\verb{$mde} reflect the heterogeneous effect; \code{extras$het} stores the
+constant-effect curve and MDE for comparison. In \code{power_event()} the
+heterogeneity applies to the overall shaped-exposure coefficient (the
+per-horizon table keeps the constant interpretation); realized test size
+is unchanged (at effect 0 the two setups coincide).}
 }
 \value{
 An object of class \code{"simpower"}. See \code{\link[=summary.simpower]{summary.simpower()}} and

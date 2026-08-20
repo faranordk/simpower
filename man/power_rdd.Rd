@@ -25,7 +25,8 @@ power_rdd(
   crit_method = c("empirical", "normal"),
   power_targets = c(0.8, 0.9),
   seed = 5000,
-  use_rdrobust = TRUE
+  use_rdrobust = TRUE,
+  het = NULL
 )
 }
 \arguments{
@@ -40,7 +41,10 @@ power_rdd(
 
 \item{controls}{Optional character vector of control-variable column names.
 Factors/characters are expanded to dummies. Controls are partialled out in
-every simulated fit.}
+every simulated fit, and the recombination preserves their predicted
+component of the outcome (only the control-purged residual is recombined
+across units), so the simulated SEs -- and the MDE -- reflect the
+efficiency gain from controls that predict the outcome.}
 
 \item{bandwidth}{Half-width of the estimation window around the cutoff. When
 \code{NULL}, an MSE-optimal bandwidth from \pkg{rdrobust} is used if available,
@@ -82,6 +86,28 @@ Gaussian quantile (the previous behaviour).}
 
 \item{use_rdrobust}{If \code{TRUE} and \pkg{rdrobust} is installed, use it for
 MSE-optimal bandwidth selection when \code{bandwidth} is \code{NULL}.}
+
+\item{het}{Optional \strong{heterogeneous-effects} specification (default \code{NULL}
+= the usual constant effect). Real effects rarely hit every unit equally,
+and heterogeneity costs power; \code{het} quantifies that cost. Supply either a
+numeric vector interpreted as an equal-probability set of per-unit effect
+multipliers -- e.g. \code{het = c(0, 2)}: the effect is absent in half the
+units and doubled in the other half -- or a \verb{function(n)} returning \code{n}
+multipliers (e.g. \code{function(n) rlnorm(n, -0.32, 0.8)}). Multiplier
+vectors are normalised to mean one, so the effect axis remains the
+\strong{average} effect and curves are directly comparable to the constant
+case. Each rep draws fresh multipliers per unit (per cluster in IV/RDD;
+per observation when there is no id) on an isolated RNG stream, so the
+simulated null draws are bit-identical to a run without \code{het} (common
+random numbers). Because all estimators are linear in the outcome and all
+SEs are sandwiches, the heterogeneous injection is evaluated \emph{exactly} --
+the coefficient shifts by \code{e * lambda} and the variance is quadratic in
+\code{e} -- with no refitting across effect sizes. The returned \verb{$power} and
+\verb{$mde} reflect the heterogeneous effect; \code{extras$het} stores the
+constant-effect curve and MDE for comparison. In \code{power_event()} the
+heterogeneity applies to the overall shaped-exposure coefficient (the
+per-horizon table keeps the constant interpretation); realized test size
+is unchanged (at effect 0 the two setups coincide).}
 }
 \value{
 An object of class \code{"simpower"} (design \code{"rdd"}). \code{extras$bandwidth}
